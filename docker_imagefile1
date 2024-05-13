@@ -1,3 +1,5 @@
+PHP_VERSION=8.3
+
 FROM ubuntu:latest
 
 RUN apt update && \
@@ -17,7 +19,7 @@ RUN apt update && \
     apt install -y \
     curl \
     wget \
-    php \
+    php${PHP_VERSION} \
     redis-server \
     mysql-server \
     mongodb-org \
@@ -27,12 +29,6 @@ RUN apt update && \
     rsync \
     unzip \
     zip \
-    && apt clean && rm -rf /var/lib/apt/lists/*
-
-# Install PHP extensions matching the installed PHP version
-RUN PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;") && \
-    apt update && \
-    apt install -y \
     php-redis=${PHP_VERSION} \
     php-mysql=${PHP_VERSION} \
     php-mongodb=${PHP_VERSION} \
