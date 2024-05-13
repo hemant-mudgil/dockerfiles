@@ -1,0 +1,96 @@
+FROM ubuntu:latest
+
+RUN apt update && \
+    apt install -y \
+    gnupg \
+    curl
+    
+RUN curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | \
+    gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg \
+    --dearmor
+   
+RUN echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+
+
+# Install necessary packages
+RUN apt update && \
+    apt install -y \
+    curl \
+    wget \
+    php \
+    redis-server \
+    mysql-server \
+    mongodb-org \
+    apache2 \
+    lighttpd \
+    openssh-server \
+    rsync \
+    unzip \
+    zip \
+    && apt clean && rm -rf /var/lib/apt/lists/*
+
+# Install PHP extensions matching the installed PHP version
+RUN PHP_VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;") && \
+    apt update && \
+    apt install -y \
+    php-redis=${PHP_VERSION} \
+    php-mysql=${PHP_VERSION} \
+    php-mongodb=${PHP_VERSION} \
+    php-gd=${PHP_VERSION} \
+    php-xml=${PHP_VERSION} \
+    php-curl=${PHP_VERSION} \
+    php-mbstring=${PHP_VERSION} \
+    php-zip=${PHP_VERSION} \
+    && apt clean && rm -rf /var/lib/apt/lists/*
+
+# Install Composer
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === 'dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;" && \
+    php composer-setup.php && \
+    php -r "unlink('composer-setup.php');" && \
+    mv composer.phar /usr/local/bin/composer
+
+# Create directory and download Cloudflare GPG key
+RUN mkdir -p --mode=0755 /usr/share/keyrings && \
+    apt update && \
+    apt install -y curl && \
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null && \
+    apt remove -y curl && \
+    apt clean && rm -rf /var/lib/apt/lists/*
+
+# Add Cloudflared repository to package manager's sources list
+RUN echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflared.list
+
+# Update package manager and install Cloudflared
+RUN apt update --fix-missing && apt install -y cloudflared
+
+# Expose ports
+EXPOSE 80/tcp 80/udp 443/tcp 443/udp 8080/tcp 8080/udp 22/tcp 873/tcp
+
+# Create volumes for data persistence
+VOLUME ["/var/lib/mysql", "/var/lib/redis", "/var/lib/mongodb", "/var/www/html"]
+
+# Generate SSH keys
+RUN ssh-keygen -A
+
+# Set root password
+RUN echo 'root:your_password_here' | chpasswd
+
+# Allow password authentication for SSH
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+# Enable .htaccess support
+RUN sed -i 's/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
+
+# Set correct permissions for /var/www/html
+RUN chown -R www-data:www-data /var/www/html && \
+    chmod -R 755 /var/www/html
+
+# Start services
+CMD service redis-server start && \
+    service mysql start && \
+    service mongodb start && \
+    apache2ctl -D FOREGROUND && \
+    lighttpd -D -f /etc/lighttpd/lighttpd.conf && \
+    cloudflared tunnel && \
+    /usr/sbin/sshd -D
